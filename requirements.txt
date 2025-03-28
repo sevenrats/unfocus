@@ -1,0 +1,5 @@
+aiopath
+holoviews
+hvplot
+scipy
+spatialpandas

@@ -5,18 +5,19 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from panel.io.fastapi import add_applications
 
-from .utils import GitUtil
+from utils import GitUtil
 
 BRANCH = "main"
-REPO = "/opt/reporting/test-reports"
+REPO = "/opt/reports/"
 
 
 class Manager:
     def __init__(self, app):
         self.app = app
         self.branch = BRANCH
-        self.repo = REPO
-        self.routes = {}  # {k:f"{self.repo}/{v}" for k,v in ROUTES.items}
+        self.repo_str = REPO
+        self.repo_path = Path(self.repo_str)
+        self.routes = {}  # {k:f"{self.repo_str}/{v}" for k,v in ROUTES.items}
         self.notebooks = {}  # {v:k for k,v in ROUTES.items}
         self.git = GitUtil(self)
         self.scheduler = AsyncIOScheduler()
@@ -24,24 +25,35 @@ class Manager:
 
     async def start(self):
         async for path in Path(REPO).rglob("*.ipynb"):
-            self.add_route_for_path(path)
+            await self.add_route_for_path(path)
         self.current_hash = await self.git.get_commit_hash(remote=False)
         self.scheduler.start()
-        app.state.scheduler.add_job(
-            self.check_for_updates, "interval", seconds=10, args=[app]
-        )
+        self.scheduler.add_job(self.check_for_updates, "interval", seconds=10)
+
+    async def shutdown(self):
+        self.scheduler.shutdown()
 
     async def add_route_for_path(self, path):
-        if not path.is_relative_to(self.repo):
-            print("Cannot add a route for a path that is not in my local repo")
-            return
-        slug = str(path.relative_to(self.repo).with_suffix(""))
+        if not path.is_relative_to(self.repo_str):
+            # then the path came from git diff and doesn't contain relation info
+            if not await (self.repo_path / str(path)).is_file():
+                print(f"Cannot add a route for {path} which is not in my local repo")
+                return
+            else:
+                print(f"The path {path} is in my repo!")
+            slug = str(path.with_suffix(""))
+        else:
+            slug = str(path.relative_to(self.repo_str).with_suffix(""))
+        slug = "/" + slug
         self.routes[slug] = await path.resolve()
         self.notebooks[str(path)] = slug
-        add_applications({slug: self.routes[slug]})
+        print(f"Adding route {slug} for notebook {path}")
+        add_applications({slug: self.routes[slug]}, app=self.app)
 
     async def check_for_updates(self):
-        if await self.git.get_commit_hash() != self.current_hash:
+        remote_hash = await self.git.get_commit_hash()
+        if remote_hash != self.current_hash:
+            print("Remote repo was updated! Pulling.")
             await self.git.pull()
             changed_files = await self.git.get_changed_files()
             self.current_hash = await self.git.get_commit_hash(remote=False)
@@ -49,7 +61,7 @@ class Manager:
                 if file in self.notebooks:
                     await self.reload_route(self.notebooks[file])
                 else:
-                    self.add_route_for_path(Path(file))
+                    await self.add_route_for_path(Path(file))
 
     async def reload_route(self, slug):
         to_remove = []
@@ -67,7 +79,7 @@ async def lifespan(app: FastAPI):
     await app.state.manager.start()
     yield
     print("Shutting down...")
-    app.state.scheduler.shutdown()
+    await app.state.manager.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
