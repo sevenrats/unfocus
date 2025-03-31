@@ -6,7 +6,7 @@ class GitUtil:
         self.manager = manager
         self.app = self.manager.app
 
-    async def get_commit_hash(self, remote=True):
+    async def show(self, remote=True):
         branch = self.manager.branch
         if remote:
             await self.fetch()
@@ -29,7 +29,7 @@ class GitUtil:
         else:
             raise RuntimeError(f"Git error: {stderr.decode().strip()}")
 
-    async def get_changed_files(self):
+    async def diff(self):
         path = self.manager.repo_str
         current_hash = self.manager.current_hash
         process = await asyncio.create_subprocess_exec(

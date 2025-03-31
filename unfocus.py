@@ -26,7 +26,7 @@ class Manager:
     async def start(self):
         async for path in Path(REPO).rglob("*.ipynb"):
             await self.add_route_for_path(path)
-        self.current_hash = await self.git.get_commit_hash(remote=False)
+        self.current_hash = await self.git.show(remote=False)
         self.scheduler.start()
         self.scheduler.add_job(self.check_for_updates, "interval", seconds=10)
 
@@ -51,12 +51,12 @@ class Manager:
         add_applications({slug: self.routes[slug]}, app=self.app)
 
     async def check_for_updates(self):
-        remote_hash = await self.git.get_commit_hash()
+        remote_hash = await self.git.show()
         if remote_hash != self.current_hash:
             print("Remote repo was updated! Pulling.")
             await self.git.pull()
-            changed_files = await self.git.get_changed_files()
-            self.current_hash = await self.git.get_commit_hash(remote=False)
+            changed_files = await self.git.diff()
+            self.current_hash = await self.git.show(remote=False)
             for file in changed_files:
                 if file in self.notebooks:
                     await self.reload_route(self.notebooks[file])
